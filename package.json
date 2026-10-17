@@ -1,0 +1,4 @@
+{
+    "name":"housekeeping-sheet",
+    "version":"1.0.0",
+    "scripts":{"install-all":"npm install --prefix server && npm install --prefix client","build":"npm run build --prefix client","start":"node server/index.js","dev-server":"node server/index.js","dev-client":"npm run dev --prefix client"}}
