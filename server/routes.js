@@ -3,13 +3,8 @@ const rateLimit = require("express-rate-limit");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const ExcelJS = require("exceljs");
-const {
-  User,
-  Block,
-  Sheet,
-  DEFAULT_COLUMNS,
-  DEFAULT_TITLES,
-} = require("./models");
+const path = require("path");
+const { User, Block, Sheet, TEMPLATES } = require("./models");
 
 const KINDS = ["monthly", "weekly"];
 const TYPES = ["text", "date", "time"];
@@ -37,44 +32,62 @@ const sign = (u) =>
     expiresIn: "30d",
   });
 
-const cleanColumns = (cols) => {
-  if (!Array.isArray(cols) || cols.length < 1 || cols.length > 40)
-    throw bad("Invalid columns");
-  const seen = new Set();
-  return cols.map((c) => {
-    const key = String((c && c.key) || "");
-    if (!/^[a-zA-Z][a-zA-Z0-9_]{0,29}$/.test(key) || seen.has(key))
-      throw bad("Invalid column");
-    seen.add(key);
-    return {
-      key,
-      label: String(c.label || "").slice(0, 60),
-      type: TYPES.includes(c.type) ? c.type : "text",
-      width: Math.min(600, Math.max(60, Number(c.width) || 150)),
-    };
-  });
+const TEMPLATE_FILE = path.join(
+  __dirname,
+  "templates",
+  "Embassy_Checklists.xlsx",
+);
+const monthNames = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
+const cleanRow = (row, kind) =>
+  Object.fromEntries(
+    TEMPLATES[kind].keys.map((k) => [
+      k,
+      String((row && row[k]) || "").slice(0, 200),
+    ]),
+  );
+
+const blankRows = (kind) =>
+  Array.from({ length: TEMPLATES[kind].rows }, () => cleanRow({}, kind));
+
+const cleanMeta = (meta, kind) =>
+  Object.fromEntries(
+    TEMPLATES[kind].meta
+      .filter((k) => meta && meta[k] !== undefined)
+      .map((k) => [k, String(meta[k]).slice(0, k === "remarks" ? 1000 : 200)]),
+  );
+
+const view = (s) => {
+  const kind = s.kind || "monthly";
+  return {
+    rows: Array.from({ length: TEMPLATES[kind].rows }, (_, i) =>
+      cleanRow(s.rows[i], kind),
+    ),
+    meta: s.meta || {},
+    locked: !!s.locked,
+    version: s.version,
+    updatedBy: s.updatedBy || "",
+  };
 };
 
-const cleanRows = (rows, cols) =>
-  rows
-    .slice(0, 500)
-    .map((r) =>
-      Object.fromEntries(
-        cols.map((c) => [c.key, String((r && r[c.key]) || "").slice(0, 200)]),
-      ),
-    );
-
-const blankRows = (cols) =>
-  Array.from({ length: 8 }, () => cleanRows([{}], cols)[0]);
-
-const view = (s) => ({
-  rows: s.rows,
-  columns: s.columns && s.columns.length ? s.columns : DEFAULT_COLUMNS,
-  title: s.title || DEFAULT_TITLES[s.kind || "monthly"],
-  locked: !!s.locked,
-  version: s.version,
-  updatedBy: s.updatedBy || "",
-});
+const dateText = (v) => (v ? v.split("-").reverse().join("/") : "");
+const periodLabel = (kind, p) =>
+  kind === "monthly"
+    ? monthNames[Number(p.slice(5, 7)) - 1] + " " + p.slice(0, 4)
+    : "Week of " + dateText(p);
 
 router.post(
   "/auth/signup",
@@ -200,14 +213,7 @@ router.get(
       try {
         sheet = await Sheet.findOneAndUpdate(
           { block: id, kind, month: period },
-          {
-            $setOnInsert: {
-              title: DEFAULT_TITLES[kind],
-              columns: DEFAULT_COLUMNS,
-              rows: blankRows(DEFAULT_COLUMNS),
-              version: 0,
-            },
-          },
+          { $setOnInsert: { rows: blankRows(kind), meta: {}, version: 0 } },
           { upsert: true, new: true, lean: true },
         );
       } catch (e) {
@@ -223,11 +229,12 @@ router.put(
   base + "/:period",
   check,
   h(async (req, res) => {
-    const { id, period } = req.params;
+    const { id, kind, period } = req.params;
     if (!Array.isArray(req.body.rows)) throw bad("Invalid rows");
-    const columns = cleanColumns(req.body.columns);
-    const rows = cleanRows(req.body.rows, columns);
-    const title = String(req.body.title || "").slice(0, 150);
+    const rows = req.body.rows
+      .slice(0, TEMPLATES[kind].rows)
+      .map((r) => cleanRow(r, kind));
+    const meta = cleanMeta(req.body.meta, kind);
     const sheet = await Sheet.findOneAndUpdate(
       {
         block: id,
@@ -235,10 +242,7 @@ router.put(
         locked: { $ne: true },
         version: Number(req.body.version),
       },
-      {
-        $set: { rows, columns, title, updatedBy: req.user.name },
-        $inc: { version: 1 },
-      },
+      { $set: { rows, meta, updatedBy: req.user.name }, $inc: { version: 1 } },
       { new: true, lean: true },
     );
     if (!sheet) {
@@ -305,45 +309,45 @@ router.get(
     ]);
     if (!found) throw bad("Sheet not found", 404);
     const sheet = view(found);
+    const m = sheet.meta;
+
     const wb = new ExcelJS.Workbook();
-    const ws = wb.addWorksheet("Sheet");
-    ws.addRow([sheet.title]);
-    ws.addRow([
-      (kind === "monthly" ? "Month : " : "Week starting : ") + period,
-      "",
-      "Block Name : " + block.name,
-    ]);
-    ws.addRow(["Sl #", ...sheet.columns.map((c) => c.label)]).font = {
-      bold: true,
-    };
-    sheet.rows.forEach((r, i) =>
-      ws.addRow([i + 1, ...sheet.columns.map((c) => r[c.key] || "")]),
-    );
-    ws.addRow([]);
-    ws.addRow([
-      "Property Manager Signature :",
-      "",
-      "Facility Manager Signature :",
-    ]);
-    ws.getColumn(1).width = 8;
-    sheet.columns.forEach((c, i) => {
-      ws.getColumn(i + 2).width = Math.max(12, Math.round(c.width / 7));
+    await wb.xlsx.readFile(TEMPLATE_FILE);
+    wb.removeWorksheet(kind === "weekly" ? "Monthly" : "Weekly");
+    const ws = wb.getWorksheet(kind === "weekly" ? "Weekly" : "Monthly");
+
+    const firstRow = kind === "weekly" ? 8 : 3;
+    sheet.rows.forEach((row, i) => {
+      TEMPLATES[kind].keys.forEach((key, j) => {
+        ws.getCell(firstRow + i, j + 1).value = row[key] || null;
+      });
     });
-    ws.getRow(1).font = { bold: true, size: 14 };
-    const thin = { style: "thin" };
-    ws.eachRow((row, n) => {
-      if (n >= 3 && n <= 3 + sheet.rows.length) {
-        row.eachCell((cell) => {
-          cell.border = { top: thin, left: thin, bottom: thin, right: thin };
-        });
-      }
-    });
-    ws.pageSetup = {
-      orientation: "landscape",
-      fitToPage: true,
-      fitToWidth: 1,
-      fitToHeight: 0,
+
+    const put = (address, text) => {
+      ws.getCell(address).value = text;
     };
+    if (kind === "weekly") {
+      put("A6", "Date of inspection: " + dateText(m.inspDate));
+      put("C6", "Block: " + (m.block !== undefined ? m.block : block.name));
+      put("A27", "Remarks/Comments:\n" + (m.remarks || ""));
+      put("A30", "Name: " + (m.chkName || ""));
+      put("A31", "Signature: " + (m.chkSign || ""));
+      put("G30", "Name: " + (m.verName || ""));
+      put("G31", "Signature: " + (m.verSign || ""));
+    } else {
+      put(
+        "A1",
+        "Month : " +
+          (m.month !== undefined ? m.month : periodLabel(kind, period)),
+      );
+      put(
+        "K1",
+        "Block Name : " + (m.block !== undefined ? m.block : block.name),
+      );
+      put("A25", "Property Manager Signature : " + (m.pmSign || ""));
+      put("J25", "Facility Manager Signature : " + (m.fmSign || ""));
+    }
+
     res.setHeader(
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

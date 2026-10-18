@@ -1,0 +1,177 @@
+@page {
+  size: A4 landscape;
+  margin: 10.16mm;
+}
+
+.paper-scroll {
+  overflow-x: auto;
+}
+
+.paper-zoom {
+  zoom: 1.4;
+  width: max-content;
+  margin: 0 auto;
+}
+
+table.paper {
+  border-collapse: collapse;
+  table-layout: fixed;
+  background: #fff;
+  color: #000;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+table.paper td {
+  border: 0.3mm solid #000;
+  padding: 0 0.7mm;
+  overflow: hidden;
+  line-height: 1.2;
+  vertical-align: middle;
+  font-size: inherit;
+  height: auto;
+}
+
+table.paper td.nob {
+  border: 0;
+}
+
+table.paper td.c {
+  text-align: center;
+}
+
+table.paper td.rel {
+  position: relative;
+  padding: 0;
+}
+
+table.paper td.logo {
+  padding: 0;
+  text-align: center;
+}
+
+table.paper td.logo img {
+  display: block;
+  margin: 0 auto;
+  object-fit: contain;
+}
+
+.paper .f {
+  display: block;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  border: 0;
+  margin: 0;
+  padding: 0 0.7mm;
+  background: transparent;
+  color: #000;
+  font: inherit;
+  outline: none;
+  resize: none;
+  opacity: 1;
+}
+
+.paper .rel > .f {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.paper .f:focus {
+  background: #e6f4f1;
+}
+
+.paper select.f {
+  -webkit-appearance: none;
+  appearance: none;
+  text-align: center;
+  text-align-last: center;
+  cursor: pointer;
+}
+
+.paper .fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+}
+
+.paper .fill.col {
+  flex-direction: column;
+  padding: 0.6mm 0.7mm;
+}
+
+.paper .fill.row {
+  align-items: center;
+  padding: 0 0.7mm;
+  gap: 1mm;
+}
+
+.paper .fill.row.top {
+  align-items: flex-start;
+  padding-top: 0.6mm;
+}
+
+.paper .fill span,
+.paper .fill b {
+  white-space: nowrap;
+}
+
+.paper .fill .f {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  padding: 0 0.5mm;
+}
+
+@media print {
+  html,
+  body {
+    background: #fff !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .app {
+    display: block !important;
+    min-height: 0 !important;
+  }
+
+  .wrap {
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: none !important;
+    width: auto !important;
+  }
+
+  .paper-scroll {
+    overflow: visible !important;
+  }
+
+  .paper-zoom {
+    zoom: 1 !important;
+  }
+
+  .print-page {
+    width: 100%;
+    height: 189.5mm;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .paper .f:focus {
+    background: transparent;
+  }
+
+  .paper .f.empty::-webkit-datetime-edit {
+    color: transparent;
+  }
+
+  .paper input[type="date"]::-webkit-calendar-picker-indicator,
+  .paper input[type="time"]::-webkit-calendar-picker-indicator {
+    display: none;
+  }
+}

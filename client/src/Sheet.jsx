@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { api } from "./api";
-import Logo from "./Logo";
-import { COMPANY } from "./config";
+import { Weekly, Monthly } from "./Paper";
 
 const monthNames = [
   "January",
@@ -79,7 +78,6 @@ export default function Sheet({ block, back }) {
   const [period, setPeriod] = useState("");
   const [data, setData] = useState(null);
   const [dirty, setDirty] = useState(false);
-  const [editMode, setEditMode] = useState(false);
   const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
   const [showDelete, setShowDelete] = useState(false);
@@ -96,7 +94,6 @@ export default function Sheet({ block, back }) {
       setPeriod(p);
       setDirty(false);
       setMsg("");
-      setEditMode(false);
       setPeriods((list) => (list.includes(p) ? list : [...list, p].sort()));
     } catch (e) {
       setError(e.message);
@@ -161,87 +158,26 @@ export default function Sheet({ block, back }) {
     setMsg("");
   };
 
-  const editCell = (i, key, value) => {
+  const setCell = (i, key, value) => {
     setData((d) => {
       const rows = d.rows.map((r, j) => (j === i ? { ...r, [key]: value } : r));
-      if (key === "start" || key === "close")
+      if (kind === "monthly" && (key === "start" || key === "close")) {
         rows[i].hours = calcHours(rows[i].start, rows[i].close);
+      }
       return { ...d, rows };
     });
     touch();
   };
 
-  const changeColumn = (index, patch) => {
-    setData((d) => ({
-      ...d,
-      columns: d.columns.map((c, j) => (j === index ? { ...c, ...patch } : c)),
-    }));
+  const setMeta = (key, value) => {
+    setData((d) => ({ ...d, meta: { ...d.meta, [key]: value } }));
     touch();
-  };
-
-  const addColumn = () => {
-    const key = "c" + Date.now().toString(36);
-    setData((d) => ({
-      ...d,
-      columns: [
-        ...d.columns,
-        { key, label: "New column", type: "text", width: 160 },
-      ],
-    }));
-    touch();
-  };
-
-  const removeColumn = (index) => {
-    if (!window.confirm("Remove this column and all its data?")) return;
-    setData((d) => ({
-      ...d,
-      columns: d.columns.filter((c, j) => j !== index),
-    }));
-    touch();
-  };
-
-  const addRow = () => {
-    setData((d) => ({
-      ...d,
-      rows: [...d.rows, Object.fromEntries(d.columns.map((c) => [c.key, ""]))],
-    }));
-    touch();
-  };
-
-  const removeRow = (index) => {
-    if (!window.confirm("Remove this row?")) return;
-    setData((d) => ({ ...d, rows: d.rows.filter((r, j) => j !== index) }));
-    touch();
-  };
-
-  const startResize = (event, index) => {
-    event.preventDefault();
-    const startX = event.clientX;
-    const startWidth = data.columns[index].width;
-    const onMove = (e) => {
-      const width = Math.min(
-        600,
-        Math.max(60, startWidth + e.clientX - startX),
-      );
-      changeColumn(index, { width });
-    };
-    const onUp = () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
   };
 
   const save = async () => {
     try {
       setError("");
-      const body = {
-        rows: data.rows,
-        columns: data.columns,
-        title: data.title,
-        version: data.version,
-      };
+      const body = { rows: data.rows, meta: data.meta, version: data.version };
       const result = await api(`${base}/${period}`, { method: "PUT", body });
       setData({ ...data, version: result.version });
       setDirty(false);
@@ -298,12 +234,6 @@ export default function Sheet({ block, back }) {
   const next = periods.length
     ? nextPeriod(kind, periods[periods.length - 1])
     : currentPeriod(kind);
-  const canEdit = data && !locked;
-  const tableWidth = data
-    ? data.columns.reduce((sum, c) => sum + c.width, 0) +
-      44 +
-      (editMode ? 44 : 0)
-    : 0;
 
   return (
     <div className="wrap">
@@ -322,13 +252,13 @@ export default function Sheet({ block, back }) {
         </button>
       </div>
 
-      <div className="row spread">
+      <div className="row spread noprint">
         <h1>
           Block {block.name}
           {period && <span className="light"> · {labelOf(kind, period)}</span>}
         </h1>
         {data && (
-          <div className="row noprint">
+          <div className="row">
             {msg && <span className="ok">{msg}</span>}
             {dirty && <span className="err">Unsaved changes</span>}
             <button className="btn" onClick={() => window.print()}>
@@ -340,14 +270,6 @@ export default function Sheet({ block, back }) {
             <button className="btn" onClick={toggleLock} disabled={dirty}>
               {locked ? "Unlock sheet" : "Lock sheet"}
             </button>
-            {canEdit && (
-              <button
-                className={"btn" + (editMode ? " on" : "")}
-                onClick={() => setEditMode(!editMode)}
-              >
-                {editMode ? "Done editing layout" : "Edit layout"}
-              </button>
-            )}
             <button
               className="btn danger"
               onClick={() => setShowDelete(true)}
@@ -404,7 +326,7 @@ export default function Sheet({ block, back }) {
       </div>
 
       {error && (
-        <div className="err" style={{ marginBottom: 12 }}>
+        <div className="err noprint" style={{ marginBottom: 12 }}>
           {error}
         </div>
       )}
@@ -415,133 +337,32 @@ export default function Sheet({ block, back }) {
       )}
 
       {data ? (
-        <div className="card">
-          <div className="sheet-head">
-            <Logo size={60} />
-            <div>
-              <div className="muted">{COMPANY.name}</div>
-              {editMode ? (
-                <input
-                  className="in title-in"
-                  value={data.title}
-                  onChange={(e) => {
-                    setData({ ...data, title: e.target.value });
-                    touch();
-                  }}
-                />
-              ) : (
-                <h2>{data.title}</h2>
-              )}
+        <div>
+          <div className="print-page">
+            <div className="paper-scroll">
+              <div className="paper-zoom">
+                {kind === "weekly" ? (
+                  <Weekly
+                    rows={data.rows}
+                    meta={data.meta}
+                    locked={locked}
+                    block={block.name}
+                    setCell={setCell}
+                    setMeta={setMeta}
+                  />
+                ) : (
+                  <Monthly
+                    rows={data.rows}
+                    meta={data.meta}
+                    locked={locked}
+                    block={block.name}
+                    monthLabel={labelOf(kind, period)}
+                    setCell={setCell}
+                    setMeta={setMeta}
+                  />
+                )}
+              </div>
             </div>
-          </div>
-          <div className="row">
-            <b>
-              {kind === "monthly" ? "Month" : "Week"}: {labelOf(kind, period)}
-            </b>
-            <b style={{ marginLeft: 24 }}>Block Name: {block.name}</b>
-          </div>
-
-          <div className="scroll">
-            <table style={{ width: tableWidth }}>
-              <colgroup>
-                <col style={{ width: 44 }} />
-                {data.columns.map((c) => (
-                  <col key={c.key} style={{ width: c.width }} />
-                ))}
-                {editMode && <col style={{ width: 44 }} />}
-              </colgroup>
-              <thead>
-                <tr>
-                  <th>Sl #</th>
-                  {data.columns.map((c, i) => (
-                    <th key={c.key}>
-                      {editMode ? (
-                        <div className="th-edit">
-                          <input
-                            value={c.label}
-                            onChange={(e) =>
-                              changeColumn(i, { label: e.target.value })
-                            }
-                            aria-label="Column heading"
-                          />
-                          <button
-                            className="x"
-                            onClick={() => removeColumn(i)}
-                            aria-label="Remove column"
-                          >
-                            ×
-                          </button>
-                          <span
-                            className="handle"
-                            onPointerDown={(e) => startResize(e, i)}
-                          />
-                        </div>
-                      ) : (
-                        c.label
-                      )}
-                    </th>
-                  ))}
-                  {editMode && <th />}
-                </tr>
-              </thead>
-              <tbody>
-                {data.rows.map((row, i) => (
-                  <tr key={i}>
-                    <td className="n">{i + 1}</td>
-                    {data.columns.map((c) => (
-                      <td key={c.key}>
-                        <input
-                          type={c.type}
-                          value={row[c.key] || ""}
-                          readOnly={!canEdit || c.key === "hours"}
-                          onChange={(e) => editCell(i, c.key, e.target.value)}
-                          aria-label={c.label + " row " + (i + 1)}
-                        />
-                      </td>
-                    ))}
-                    {editMode && (
-                      <td className="n">
-                        <button
-                          className="x"
-                          onClick={() => removeRow(i)}
-                          aria-label="Remove row"
-                        >
-                          ×
-                        </button>
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {editMode && (
-            <div className="row noprint" style={{ marginTop: 14 }}>
-              <button className="btn" onClick={addRow}>
-                + Add row
-              </button>
-              <button className="btn" onClick={addColumn}>
-                + Add column
-              </button>
-              <span className="muted">
-                Drag the right edge of a heading to change column width.
-              </span>
-            </div>
-          )}
-          {!editMode && canEdit && (
-            <button
-              className="btn noprint"
-              style={{ marginTop: 14 }}
-              onClick={addRow}
-            >
-              + Add row
-            </button>
-          )}
-
-          <div className="sign">
-            <span>Property Manager Signature :</span>
-            <span>Facility Manager Signature :</span>
           </div>
           {data.updatedBy && (
             <div className="muted noprint" style={{ marginTop: 14 }}>
@@ -550,11 +371,13 @@ export default function Sheet({ block, back }) {
           )}
         </div>
       ) : (
-        <p className="sub">No sheet open. Use the Start button above.</p>
+        <p className="sub noprint">
+          No sheet open. Use the Start button above.
+        </p>
       )}
 
       {showDelete && (
-        <div className="modal">
+        <div className="modal noprint">
           <div className="box">
             <h2>Delete {labelOf(kind, period)} sheet?</h2>
             <p>
